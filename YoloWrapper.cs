@@ -1,15 +1,16 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace Darknet
 {
     public class YoloWrapper : IDisposable
     {
-        private const string YoloLibraryName = "detector.dll";
-        private const int MaxObjects = 20;
+        private const string YoloLibraryName = "yolov5.dll";
+        private const int MaxObjects = 1000;
 
         [DllImport(YoloLibraryName, EntryPoint = "init")]
-        private static extern int InitializeYolo(string configurationFilename, string weightsFilename);
+        private static extern int InitializeYolo(string configurationFilename, string weightsFilename, int gpu);
 
         [DllImport(YoloLibraryName, EntryPoint = "detect_image")]
         private static extern int DetectImage(string filename, ref BboxContainer container);
@@ -39,7 +40,7 @@ namespace Darknet
 
         public YoloWrapper(string configurationFilename, string weightsFilename, int gpu)
         {
-            InitializeYolo(configurationFilename, weightsFilename);
+            InitializeYolo(configurationFilename, weightsFilename, gpu);
         }
 
         public void Dispose()
@@ -55,7 +56,7 @@ namespace Darknet
             return container.candidates;
         }
 
-        
+
         public bbox_t[] Detect(byte[] imageData)
         {
             var container = new BboxContainer();
@@ -85,6 +86,37 @@ namespace Darknet
 
             return container.candidates;
         }
-        
+
+        public async Task<bbox_t[]> DetectAsync(byte[] imageData)
+        {
+            return await Task.Run(() =>
+            {
+                var container = new BboxContainer();
+                var size = Marshal.SizeOf(imageData[0]) * imageData.Length;
+                var pnt = Marshal.AllocHGlobal(size);
+
+                try
+                {
+                    // Copy the array to unmanaged
+                    Marshal.Copy(imageData, 0, pnt, imageData.Length);
+
+                    var count = DetectImage(pnt, imageData.Length, ref container);
+
+                    if (count == -1)
+                    {
+                        throw new NotSupportedException($"{YoloLibraryName} has no OpenCv support");
+                    }
+                }
+                catch ( Exception exception)
+                {
+                    return null;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pnt);
+                }
+                return container.candidates;
+            });
+        }
     }
 }
