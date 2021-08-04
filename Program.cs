@@ -2,6 +2,7 @@
 using System.IO;
 using Darknet;
 using static Darknet.YoloWrapper;
+using static Darknet.IdWrapper;
 using ResNet;
 using static ResNet.ResNet18Wrapper;
 
@@ -9,6 +10,7 @@ using OpenCvSharp;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Drawing;
+using System.Linq;
 
 namespace YoloTest_CS
 {
@@ -19,12 +21,21 @@ namespace YoloTest_CS
         public int w { get; set; }
         public int h { get; set; }
         public float prob { get; set; }
-
+        public int obj_id { get; set; }
     }
     class Program
     {
-        static YoloWrapper yolodetector;
-        static ResNet18Wrapper resnetclassificator;
+        static Dictionary<int, string> _namesDict = new Dictionary<int, string>
+        {
+            { 0, "1" }, { 1, "2" }, { 2, "3" }, { 3, "4" }, { 4, "5" },
+            { 5, "6" }, { 6, "7" }, { 7, "8" }, { 8, "9" }, { 9, "0" },
+            { 10, "A" }, { 11, "E" }, { 12, "F" }, { 13, "H" }, { 14, "J" },
+            { 15, "K" }, { 16, "P" }, { 17, "X" }, { 18, "Y" }, { 19, "L" },
+            { 20, "B" }, { 21, "T" }, { 22, "R" }
+        };
+        static YoloWrapper roiDetector;
+        static IdWrapper idDetector;
+        static ResNet18Wrapper resnetClassificator;
         const float conf_thres = 0.25f;
 
         public static byte[] GetPictureData(string imagePath)
@@ -47,8 +58,10 @@ namespace YoloTest_CS
             DateTime begin_load_model = DateTime.Now;
             try
             {
-                yolodetector = new YoloWrapper("yolov5s", "../yolov5s.wts", 0);
-                resnetclassificator = new ResNet18Wrapper("resnet18", "../resnet18.wts", 0);
+                // keep model config name as xxx_yolov5s
+                roiDetector = new YoloWrapper("roi_yolov5s", "../roi_yolov5s.wts", 0, 5);
+                idDetector = new IdWrapper("id_yolov5s", "../id_yolov5s.wts", 0, 23);
+                resnetClassificator = new ResNet18Wrapper("resnet18", "../resnet18.wts", 0);
             }
             catch (Exception)
             {
@@ -66,7 +79,7 @@ namespace YoloTest_CS
             }
             foreach( var file_info in file_info_list)
             {
-                DetectROIClassBlur(path, file_info.Name, output_path);
+                DetectROIClassBlur(path, file_info.Name, output_path, true);
                 Console.WriteLine("****************************************");
                 Console.WriteLine();
             }
@@ -77,8 +90,9 @@ namespace YoloTest_CS
 
 
             //dispose of the two models
-            yolodetector.Dispose();
-            resnetclassificator.Dispose();
+            roiDetector.Dispose();
+            idDetector.Dispose();
+            resnetClassificator.Dispose();
         } 
 
 
@@ -92,8 +106,8 @@ namespace YoloTest_CS
 
             try
             {
-                yolodetector = new YoloWrapper("yolov5s", "../yolov5s.wts", 0);
-                resnetclassificator = new ResNet18Wrapper("resnet18", "../resnet18.wts", 0);
+                roiDetector = new YoloWrapper("yolov5s", "../yolov5s.wts", 0);
+                resnetClassificator = new ResNet18Wrapper("resnet18", "../resnet18.wts", 0);
             }
             catch (Exception)
             {
@@ -122,8 +136,8 @@ namespace YoloTest_CS
 
             }
             Task.WaitAll(task_list.ToArray());
-            yolodetector.Dispose();
-            resnetclassificator.Dispose();
+            roiDetector.Dispose();
+            resnetClassificator.Dispose();
         }
         */
 
@@ -136,12 +150,12 @@ namespace YoloTest_CS
 
             //detection of roi using yolov5s
             bbox_t[] result_list;
-            lock(yolodetector)
+            lock(roiDetector)
             {
-                result_list = yolodetector.Detect(picBytes);
+                result_list = roiDetector.Detect(picBytes);
             }
 
-            List<YoloResult> yoloResults = new List<YoloResult>();
+            List<YoloResult> roiResults = new List<YoloResult>();
             List<(int, float)> blurryResults = new List<(int, float)>();
 
             //convert roi result from bbox_t[] to YoloResult
@@ -155,63 +169,133 @@ namespace YoloTest_CS
                 {
                     continue;
                 }
-                yoloResults.Add(new YoloResult
+                roiResults.Add(new YoloResult
                 {
                     x = (int)b.x,
                     y = (int)b.y,
                     w = (int)b.w,
                     h = (int)b.h,
-                    prob = b.prob
+                    prob = b.prob,
+                    obj_id = (int)b.obj_id
                 });
             }
 
             Mat plot_img = null;
+            string image_id = image_name;
             //if (save_plot)
             //{
             //    plot_img = img.Clone();
             //}
             //start blur classification
             Console.WriteLine("start blurry classification");
-            foreach (var result in yoloResults)
+            foreach (var result in roiResults)
             {
-                Console.WriteLine($"roi deteteted -> x:{result.x}, y:{result.y}");
-
-                //crop the two patches using roi result from yolov5s in turn
-                var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
-                Mat patch = new Mat(img, roi);
-                byte[] patchBytes = patch.ToBytes();
-                //check if the patch is blurry using resnet18
-                //result is (blurry, conf), blurry=1 means blurry, blurry=0 means not blurry
-                //conf is the confidence of current classification result
-                int blurry;
-                float conf;
-                lock(resnetclassificator){
-                    (blurry, conf) = resnetclassificator.ClassBlur(patchBytes);
-                }
-                bool isBlurry = blurry > 0 ? true : false;
-                Console.WriteLine($"blurry -> {isBlurry} with confidence -> {conf}");
-                blurryResults.Add((blurry, conf));
-                save_plot = save_plot || isBlurry;
-                //plot of roi detection
-                if (save_plot)
+                if (result.obj_id == 0)
                 {
-                    if(plot_img == null)
-                    {
-                        plot_img = img.Clone();
+                    Console.WriteLine($"roi deteteted -> x:{result.x}, y:{result.y}");
+
+                    //crop the two patches using roi result from yolov5s in turn
+                    var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
+                    Mat patch = new Mat(img, roi);
+                    byte[] patchBytes = patch.ToBytes();
+                    //check if the patch is blurry using resnet18
+                    //result is (blurry, conf), blurry=1 means blurry, blurry=0 means not blurry
+                    //conf is the confidence of current classification result
+                    int blurry;
+                    float conf;
+                    lock(resnetClassificator){
+                        (blurry, conf) = resnetClassificator.ClassBlur(patchBytes);
                     }
-                    plot_img.Rectangle(new OpenCvSharp.Rect(result.x, result.y, result.w, result.h), Scalar.Red, 3);
-                    plot_img.PutText(isBlurry.ToString() + " " + conf.ToString("0.00"), new OpenCvSharp.Point(result.x, result.y+100), HersheyFonts.Italic, 4, Scalar.Red, 4);
+                    bool isBlurry = blurry > 0 ? true : false;
+                    Console.WriteLine($"blurry -> {isBlurry} with confidence -> {conf}");
+                    blurryResults.Add((blurry, conf));
+                    save_plot = save_plot || isBlurry;
+                    //plot of roi detection
+                    if (save_plot)
+                    {
+                        if(plot_img == null)
+                        {
+                            plot_img = img.Clone();
+                        }
+                        plot_img.Rectangle(new OpenCvSharp.Rect(result.x, result.y, result.w, result.h), Scalar.Red, 3);
+                        plot_img.PutText(isBlurry.ToString() + " " + conf.ToString("0.00"), new OpenCvSharp.Point(result.x, result.y+100), HersheyFonts.Italic, 4, Scalar.Red, 4);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"id plate deteteted -> x:{result.x}, y:{result.y}");
+
+                    //crop the id plate patches using roi result from yolov5s
+                    var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
+                    Mat patch = new Mat(img, roi);
+                    Cv2.Transpose(patch, patch);
+                    Cv2.Flip(patch, patch, 0);
+                    byte[] patchBytes = patch.ToBytes();
+
+                    //detection of id using yolov5s
+                    bbox_t[] id_result_list;
+                    lock(idDetector)
+                    {
+                        id_result_list = idDetector.Detect(patchBytes);
+                    }
+
+                    image_id = ConvertData(id_result_list);
                 }
             }
             if (save_plot)
             {
-                Cv2.ImWrite($"{output_path}//_{image_name}", plot_img);
+                Cv2.ImWrite($"{output_path}//{image_id}.jpg", plot_img);
             }
 
             //Cv2.NamedWindow("img", 0);
             //Cv2.ResizeWindow("img", 2592/4, 1944/4);
             //Cv2.ImShow("img", plot_img);
             //Cv2.WaitKey();
+        }
+
+        public static string ConvertData(bbox_t[] bbox)
+        {
+            List<YoloResult> boundingBoxes = new List<YoloResult>();
+            List<uint> y = new List<uint>();
+            var id = "";
+            Console.WriteLine("Result：");
+            //var table = new ConsoleTable("Type", "Confidence", "X", "Y", "Width", "Height");
+            foreach (var item in bbox.Where(o => o.h > 0 || o.w > 0))
+            {
+                //var type = _namesDict[(int)item.obj_id];
+                //table.AddRow(type, item.prob, item.x, item.y, item.w, item.h);
+                boundingBoxes.Add(new YoloResult
+                {
+                    x = (int)item.x,
+                    y = (int)item.y,
+                    w = (int)item.w,
+                    h = (int)item.h,
+                    prob = item.prob,
+                    obj_id = (int)item.obj_id
+                });
+                y.Add(item.y);
+            }
+            //table.Write(Format.MarkDown);
+            if (boundingBoxes.Count == 0)
+            {
+                return "NoRead";
+            }
+            var y_3ave = ((uint)y.Average(m => Convert.ToInt32(m))) / 4;
+            var y_ave = (uint)y.Average(m => Convert.ToInt32(m));
+            //Console.WriteLine($"字符组Y坐标平均值{y.Average(m => Convert.ToInt32(m))}");
+            var line_one = boundingBoxes.FindAll(a => a.y < y_ave && a.y > y_3ave);
+            line_one.Sort((m, n) => m.x.CompareTo(n.x));
+            var line_two = boundingBoxes.FindAll(a => a.y > y_ave && a.y > y_3ave);
+            line_two.Sort((m, n) => m.x.CompareTo(n.x));
+            foreach (var item in line_one)
+            {
+                id += _namesDict[item.obj_id];
+            }
+            foreach (var item in line_two)
+            {
+                id += _namesDict[item.obj_id];
+            }
+            return id;
         }
     }
 
