@@ -80,6 +80,9 @@ namespace YoloTest_CS
                 Directory.Delete(output_path, true);
             }
             Directory.CreateDirectory(output_path);
+            Directory.CreateDirectory($"{output_path}//empty");
+            Directory.CreateDirectory($"{output_path}//notBlurry");
+            Directory.CreateDirectory($"{output_path}//blurry");
             foreach( var file_info in file_info_list)
             {
                 DetectROIClassBlur(path, file_info.Name, output_path, true);
@@ -194,11 +197,14 @@ namespace YoloTest_CS
             //}
             //start blur classification
             int imageStatus = 0;
+            string statusPath = "notBlurry";
             logger.Info("start blurry classification");
             if (roiResults.Count == 0)
             {
                 logger.Info("Empty plate");
                 imageStatus = -1;
+                statusPath = "empty";
+                Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}", img);
                 logger.Info($"{image_id} is checked to be {imageStatus}");
                 return;
             }
@@ -224,8 +230,13 @@ namespace YoloTest_CS
                     }
                     DateTime end_blur = DateTime.Now;
                     logger.Info($"Time consumed for classify blur: {(end_blur - begin_blur).TotalMilliseconds} ms");
-                    bool isBlurry = blurry > 0 ? true : false;
-                    imageStatus = isBlurry ? 1 : imageStatus;
+                    bool isBlurry = false;
+                    if (blurry > 0)
+                    {
+                        isBlurry = true;
+                        imageStatus = 1;
+                        statusPath = "blurry";
+                    }
                     logger.Info($"blurry -> {isBlurry} with confidence -> {conf}");
                     blurryResults.Add((blurry, conf));
                     save_plot = save_plot || isBlurry;
@@ -265,9 +276,10 @@ namespace YoloTest_CS
                 }
             }
             logger.Info($"{image_id} is checked to be {imageStatus}");
+
             if (save_plot)
             {
-                Cv2.ImWrite($"{output_path}//{image_id}.jpg", img);
+                Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}.jpg", img);
             }
 
             //Cv2.NamedWindow("img", 0);
