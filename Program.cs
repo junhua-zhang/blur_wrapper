@@ -281,6 +281,12 @@ namespace YoloTest_CS
             {
                 Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}.jpg", img);
             }
+            FileStream fs = new FileStream("./name_id.csv", FileMode.Append);
+            StreamWriter sw = new StreamWriter(fs);
+            sw.Write($"{image_name},{image_id}\n");
+            sw.Flush();
+            sw.Close();
+            fs.Close();
 
             //Cv2.NamedWindow("img", 0);
             //Cv2.ResizeWindow("img", 2592/4, 1944/4);
