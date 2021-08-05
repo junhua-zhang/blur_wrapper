@@ -23,8 +23,10 @@ namespace YoloTest_CS
         public float prob { get; set; }
         public int obj_id { get; set; }
     }
+
     class Program
     {
+        private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
         static Dictionary<int, string> _namesDict = new Dictionary<int, string>
         {
             { 0, "1" }, { 1, "2" }, { 2, "3" }, { 3, "4" }, { 4, "5" },
@@ -68,25 +70,26 @@ namespace YoloTest_CS
                 throw;
             }
             DateTime end_load_model = DateTime.Now;
-            Console.WriteLine("+++++++++++++++++++++++++++++++++++");
-            Console.WriteLine($"Time consumed for loading model: {(end_load_model - begin_load_model).TotalMilliseconds} ms");
-            Console.WriteLine("+++++++++++++++++++++++++++++++++++");
+            logger.Info("+++++++++++++++++++++++++++++++++++");
+            logger.Info($"Time consumed for loading model: {(end_load_model - begin_load_model).TotalMilliseconds} ms");
+            logger.Info("+++++++++++++++++++++++++++++++++++");
 
             DateTime begin_detect_class = DateTime.Now;
-            if (!Directory.Exists(output_path))
+            if (Directory.Exists(output_path))
             {
-                 Directory.CreateDirectory(output_path);
+                Directory.Delete(output_path, true);
             }
+            Directory.CreateDirectory(output_path);
             foreach( var file_info in file_info_list)
             {
                 DetectROIClassBlur(path, file_info.Name, output_path, true);
-                Console.WriteLine("****************************************");
-                Console.WriteLine();
+                logger.Info("****************************************");
+                logger.Info("");
             }
             DateTime end_detect_class = DateTime.Now;
-            Console.WriteLine("+++++++++++++++++++++++++++++++++++");
-            Console.WriteLine($"Time consumed for evaluate {file_info_list.Length} images: {(end_detect_class - begin_detect_class).TotalMilliseconds} ms");
-            Console.WriteLine("+++++++++++++++++++++++++++++++++++");
+            logger.Info("+++++++++++++++++++++++++++++++++++");
+            logger.Info($"Time consumed for evaluate {file_info_list.Length} images: {(end_detect_class - begin_detect_class).TotalMilliseconds} ms");
+            logger.Info("+++++++++++++++++++++++++++++++++++");
 
 
             //dispose of the two models
@@ -143,17 +146,20 @@ namespace YoloTest_CS
 
         public static void DetectROIClassBlur(string path, string image_name, string output_path, bool save_plot=false)
         {
-            Console.WriteLine($"image file name: {path}//{image_name}");
+            logger.Info($"image file name: {path}//{image_name}");
             //read images
             Mat img = Cv2.ImRead($"{path}//{image_name}");
             byte[] picBytes = img.ToBytes();
 
             //detection of roi using yolov5s
             bbox_t[] result_list;
+            DateTime begin_roi = DateTime.Now;
             lock(roiDetector)
             {
                 result_list = roiDetector.Detect(picBytes);
             }
+            DateTime end_roi = DateTime.Now;
+            logger.Info($"Time consumed for detect roi: {(end_roi - begin_roi).TotalMilliseconds} ms");
 
             List<YoloResult> roiResults = new List<YoloResult>();
             List<(int, float)> blurryResults = new List<(int, float)>();
@@ -187,27 +193,40 @@ namespace YoloTest_CS
             //    plot_img = img.Clone();
             //}
             //start blur classification
-            Console.WriteLine("start blurry classification");
+            int imageStatus = 0;
+            logger.Info("start blurry classification");
+            if (roiResults.Count == 0)
+            {
+                logger.Info("Empty plate");
+                imageStatus = -1;
+                logger.Info($"{image_id} is checked to be {imageStatus}");
+                return;
+            }
             foreach (var result in roiResults)
             {
                 if (result.obj_id == 0)
                 {
-                    Console.WriteLine($"roi deteteted -> x:{result.x}, y:{result.y}");
+                    logger.Info($"roi deteteted -> x:{result.x}, y:{result.y}");
 
                     //crop the two patches using roi result from yolov5s in turn
                     var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
                     Mat patch = new Mat(img, roi);
+
                     byte[] patchBytes = patch.ToBytes();
                     //check if the patch is blurry using resnet18
                     //result is (blurry, conf), blurry=1 means blurry, blurry=0 means not blurry
                     //conf is the confidence of current classification result
                     int blurry;
                     float conf;
+                    DateTime begin_blur = DateTime.Now;
                     lock(resnetClassificator){
                         (blurry, conf) = resnetClassificator.ClassBlur(patchBytes);
                     }
+                    DateTime end_blur = DateTime.Now;
+                    logger.Info($"Time consumed for classify blur: {(end_blur - begin_blur).TotalMilliseconds} ms");
                     bool isBlurry = blurry > 0 ? true : false;
-                    Console.WriteLine($"blurry -> {isBlurry} with confidence -> {conf}");
+                    imageStatus = isBlurry ? 1 : imageStatus;
+                    logger.Info($"blurry -> {isBlurry} with confidence -> {conf}");
                     blurryResults.Add((blurry, conf));
                     save_plot = save_plot || isBlurry;
                     //plot of roi detection
@@ -223,7 +242,7 @@ namespace YoloTest_CS
                 }
                 else
                 {
-                    Console.WriteLine($"id plate deteteted -> x:{result.x}, y:{result.y}");
+                    logger.Info($"id plate deteteted -> x:{result.x}, y:{result.y}");
 
                     //crop the id plate patches using roi result from yolov5s
                     var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
@@ -234,17 +253,21 @@ namespace YoloTest_CS
 
                     //detection of id using yolov5s
                     bbox_t[] id_result_list;
+                    DateTime begin_id = DateTime.Now;
                     lock(idDetector)
                     {
                         id_result_list = idDetector.Detect(patchBytes);
                     }
+                    DateTime end_id = DateTime.Now;
+                    logger.Info($"Time consumed for detect id: {(end_id - begin_id).TotalMilliseconds} ms");
 
                     image_id = ConvertData(id_result_list);
                 }
             }
+            logger.Info($"{image_id} is checked to be {imageStatus}");
             if (save_plot)
             {
-                Cv2.ImWrite($"{output_path}//{image_id}.jpg", plot_img);
+                Cv2.ImWrite($"{output_path}//{image_id}.jpg", img);
             }
 
             //Cv2.NamedWindow("img", 0);
@@ -258,7 +281,6 @@ namespace YoloTest_CS
             List<YoloResult> boundingBoxes = new List<YoloResult>();
             List<uint> y = new List<uint>();
             var id = "";
-            Console.WriteLine("Result：");
             //var table = new ConsoleTable("Type", "Confidence", "X", "Y", "Width", "Height");
             foreach (var item in bbox.Where(o => o.h > 0 || o.w > 0))
             {
@@ -282,10 +304,9 @@ namespace YoloTest_CS
             }
             var y_3ave = ((uint)y.Average(m => Convert.ToInt32(m))) / 4;
             var y_ave = (uint)y.Average(m => Convert.ToInt32(m));
-            //Console.WriteLine($"字符组Y坐标平均值{y.Average(m => Convert.ToInt32(m))}");
-            var line_one = boundingBoxes.FindAll(a => a.y < y_ave && a.y > y_3ave);
+            var line_one = boundingBoxes.FindAll(a => a.y < y_ave);
             line_one.Sort((m, n) => m.x.CompareTo(n.x));
-            var line_two = boundingBoxes.FindAll(a => a.y > y_ave && a.y > y_3ave);
+            var line_two = boundingBoxes.FindAll(a => a.y > y_ave);
             line_two.Sort((m, n) => m.x.CompareTo(n.x));
             foreach (var item in line_one)
             {
@@ -295,6 +316,7 @@ namespace YoloTest_CS
             {
                 id += _namesDict[item.obj_id];
             }
+            logger.Info($"Image ID is: {id}");
             return id;
         }
     }
