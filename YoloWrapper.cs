@@ -12,6 +12,7 @@ namespace Darknet
         public UInt32 obj_id;        // class of object - from range [0, classes-1]
         public UInt32 track_id;
         public UInt32 frames_counter;
+        public float x_3d, y_3d, z_3d;  // 3-D coordinates, if there is used 3D-stereo camera
     };
 
     [StructLayout(LayoutKind.Sequential)]
