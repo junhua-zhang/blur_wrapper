@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "YoloTest_CS": {
+      "commandName": "Project",
+      "commandLineArgs": "\"../\" \"../\""
+    }
+  }
+}

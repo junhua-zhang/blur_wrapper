@@ -191,14 +191,14 @@ namespace YoloTest_CS
 
             Mat plot_img = null;
             string image_id = image_name;
-            //if (save_plot)
-            //{
-            //    plot_img = img.Clone();
-            //}
+            if (save_plot)
+            {
+                plot_img = img.Clone();
+            }
             //start blur classification
             int imageStatus = 0;
             string statusPath = "notBlurry";
-            logger.Info("start blurry classification");
+            logger.Info($"start blurry classification with length {roiResults.Count}");
             if (roiResults.Count == 0)
             {
                 logger.Info("Empty plate");
@@ -212,7 +212,7 @@ namespace YoloTest_CS
             {
                 if (result.obj_id == 0)
                 {
-                    logger.Info($"roi deteteted -> x:{result.x}, y:{result.y}");
+                    logger.Info($"roi deteteted -> x:{result.x}, y:{result.y}, w:{result.w}, h:{result.h}");
 
                     //crop the two patches using roi result from yolov5s in turn
                     var roi = new OpenCvSharp.Rect(result.x, result.y, result.w, result.h);
@@ -272,14 +272,30 @@ namespace YoloTest_CS
                     DateTime end_id = DateTime.Now;
                     logger.Info($"Time consumed for detect id: {(end_id - begin_id).TotalMilliseconds} ms");
 
+                    //foreach (var each_result in id_result_list)
+                    //{
+                    //    if (each_result.h == 0)
+                    //        break;
+                    //    logger.Info($"character deteteted -> x:{each_result.x}, y:{each_result.y}");
+
+                    //    //plot of roi detection
+                    //    patch.Rectangle(new OpenCvSharp.Rect((int)each_result.x, (int)each_result.y, (int)each_result.w, (int)each_result.h), Scalar.Red, 3);
+                    //    patch.PutText(_namesDict[(int)each_result.obj_id], new OpenCvSharp.Point(each_result.x, each_result.y+100), HersheyFonts.Italic, 4, Scalar.Red, 4);
+                    //}
+
                     image_id = ConvertData(id_result_list);
+                    logger.Info(image_id);
+                    if (image_id.Length != 8)
+                    {
+                        Cv2.ImWrite($"..//id_patch//{image_id}.jpg", patch);
+                    }
                 }
             }
             logger.Info($"{image_id} is checked to be {imageStatus}");
 
             if (save_plot)
             {
-                Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}.jpg", img);
+                Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}.jpg", plot_img);
             }
             FileStream fs = new FileStream("./name_id.csv", FileMode.Append);
             StreamWriter sw = new StreamWriter(fs);
@@ -314,6 +330,7 @@ namespace YoloTest_CS
                     obj_id = (int)item.obj_id
                 });
                 y.Add(item.y);
+                logger.Info(item.y);
             }
             //table.Write(Format.MarkDown);
             if (boundingBoxes.Count == 0)
