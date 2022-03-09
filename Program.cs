@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Drawing;
 using System.Linq;
+using System.Globalization;
 
 namespace YoloTest_CS
 {
@@ -54,16 +55,16 @@ namespace YoloTest_CS
             string path = args[0];
             string output_path = args[1];
             DirectoryInfo root = new DirectoryInfo(path);
-            FileInfo[] file_info_list = root.GetFiles();
+            FileInfo[] file_info_list = root.GetFiles("*.jpg", SearchOption.AllDirectories);
 
             //load roi detection model yolov5s, and blur classification model resnet18
             DateTime begin_load_model = DateTime.Now;
             try
             {
                 // keep model config name as xxx_yolov5s
-                roiDetector = new YoloWrapper("roi_yolov5s", "../roi_yolov5s.wts", 0, 5);
-                idDetector = new IdWrapper("id_yolov5s", "../id_yolov5s.wts", 0, 23);
-                resnetClassificator = new ResNet18Wrapper("resnet18", "../resnet18.wts", 0);
+                roiDetector = new YoloWrapper("roi_yolov5s", "../models/roi_yolov5s.wts", 0, 5);
+                idDetector = new IdWrapper("id_yolov5s", "../models/id_yolov5s.wts", 0, 23);
+                resnetClassificator = new ResNet18Wrapper("resnet18", "../models/resnet18.wts", 0);
             }
             catch (Exception)
             {
@@ -85,7 +86,7 @@ namespace YoloTest_CS
             Directory.CreateDirectory($"{output_path}//blurry");
             foreach( var file_info in file_info_list)
             {
-                DetectROIClassBlur(path, file_info.Name, output_path, true);
+                DetectROIClassBlur(file_info.DirectoryName, file_info.Name, output_path, true);
                 logger.Info("****************************************");
                 logger.Info("");
             }
@@ -152,6 +153,9 @@ namespace YoloTest_CS
             logger.Info($"image file name: {path}//{image_name}");
             //read images
             Mat img = Cv2.ImRead($"{path}//{image_name}");
+            Cv2.Transpose(img, img);
+            Cv2.Flip(img, img, FlipMode.Y);
+            
             byte[] picBytes = img.ToBytes();
 
             //detection of roi using yolov5s
@@ -260,6 +264,7 @@ namespace YoloTest_CS
                     Mat patch = new Mat(img, roi);
                     Cv2.Transpose(patch, patch);
                     Cv2.Flip(patch, patch, 0);
+                    Cv2.ImWrite("./patch.jpg", patch);
                     byte[] patchBytes = patch.ToBytes();
 
                     //detection of id using yolov5s
@@ -295,7 +300,24 @@ namespace YoloTest_CS
 
             if (save_plot)
             {
-                Cv2.ImWrite($"{output_path}//{statusPath}//{image_id}.jpg", plot_img);
+                Cv2.ImWrite($"{output_path}/{statusPath}/{image_id}.jpg", plot_img);
+
+                string summary_csv = "./summary.csv";
+                if (!File.Exists(summary_csv))
+                    using (StreamWriter writer = new StreamWriter(summary_csv))
+                        //writer.WriteLine("name,uneven,extra,break,loss,status,judge");
+                        writer.WriteLine("ID,Line,Date,Status");
+
+                int start_idx = image_name.LastIndexOf('-')+1;
+                int end_idx = image_name.LastIndexOf('.');
+                string pressLine = new DirectoryInfo(path).Name;
+                var date = DateTime.ParseExact(image_name.Substring(start_idx, end_idx - start_idx), "yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+                string line = $"{image_id},{pressLine},{date},{statusPath}";
+                using (StreamWriter writer = new StreamWriter(summary_csv,true))
+                    writer.WriteLine(line);
+
+
+
             }
             FileStream fs = new FileStream("./name_id.csv", FileMode.Append);
             StreamWriter sw = new StreamWriter(fs);
